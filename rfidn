@@ -1,0 +1,159 @@
+#include <Wire.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// RFID setup
+#define RST_PIN 4
+#define SS_PIN 5
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+// DFPlayer Mini setup
+SoftwareSerial mySoftwareSerial(16, 17);  // RX, TX for DFPlayer
+DFRobotDFPlayerMini dfPlayer;
+
+// Button and LED setup
+#define BUTTON_PIN 15
+#define LED_PIN 13
+
+bool addRemoveMode = false;  // Flag to switch between normal and add/remove mode
+byte authorizedUID[][4] = { {0xDE, 0xAD, 0xBE, 0xEF} };  // Array to store authorized UIDs
+int authorizedCount = 1;
+
+void setup() {
+  Serial.begin(115200);
+  
+  // RFID setup
+  SPI.begin();
+  rfid.PCD_Init();
+
+  // OLED setup
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED allocation failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // DFPlayer Mini setup
+  mySoftwareSerial.begin(9600);
+  if (!dfPlayer.begin(mySoftwareSerial)) {
+    Serial.println("DFPlayer Mini not detected");
+    while (true);
+  }
+  dfPlayer.volume(20);  // Set volume level
+
+  // Button and LED setup
+  pinMode(BUTTON_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  // Display initial message
+  displayMessage("Place RFID card...");
+}
+
+void loop() {
+  // Check if the button is pressed to toggle add/remove mode
+  if (digitalRead(BUTTON_PIN) == HIGH) {
+    addRemoveMode = !addRemoveMode;  // Toggle mode
+    if (addRemoveMode) {
+      displayMessage("Add/Remove Mode");
+      digitalWrite(LED_PIN, HIGH);  // Turn on LED to indicate add/remove mode
+    } else {
+      displayMessage("Normal Mode");
+      digitalWrite(LED_PIN, LOW);  // Turn off LED to indicate normal mode
+    }
+    delay(1000);  // Debounce delay
+  }
+
+  // RFID card handling
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  if (addRemoveMode) {
+    // Add or remove the card
+    if (isAuthorized()) {
+      removeUID();
+      dfPlayer.play(2);  // Play failure sound (removed)
+      displayMessage("Card Removed");
+    } else {
+      addUID();
+      dfPlayer.play(1);  // Play success sound (added)
+      displayMessage("Card Added");
+    }
+  } else {
+    // Normal mode: check if card is authorized
+    if (isAuthorized()) {
+      dfPlayer.play(1);  // Success sound
+      displayMessage("Access Granted");
+    } else {
+      dfPlayer.play(2);  // Failure sound
+      displayMessage("Access Denied");
+    }
+  }
+
+  delay(1000);
+  rfid.PICC_HaltA();  // Stop reading
+}
+
+// Function to check if the card is authorized
+bool isAuthorized() {
+  for (int i = 0; i < authorizedCount; i++) {
+    if (compareUID(authorizedUID[i], rfid.uid.uidByte)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Function to add a UID to the authorized list
+void addUID() {
+  if (authorizedCount < 10) {  // Limiting to 10 authorized cards for simplicity
+    for (int i = 0; i < 4; i++) {
+      authorizedUID[authorizedCount][i] = rfid.uid.uidByte[i];
+    }
+    authorizedCount++;
+  }
+}
+
+// Function to remove the current UID from the authorized list
+void removeUID() {
+  for (int i = 0; i < authorizedCount; i++) {
+    if (compareUID(authorizedUID[i], rfid.uid.uidByte)) {
+      // Shift remaining UIDs
+      for (int j = i; j < authorizedCount - 1; j++) {
+        for (int k = 0; k < 4; k++) {
+          authorizedUID[j][k] = authorizedUID[j + 1][k];
+        }
+      }
+      authorizedCount--;
+      break;
+    }
+  }
+}
+
+// Function to compare two UIDs
+bool compareUID(byte *uid1, byte *uid2) {
+  for (int i = 0; i < 4; i++) {
+    if (uid1[i] != uid2[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Function to display message on OLED
+void displayMessage(String message) {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print(message);
+  display.display();
+}
