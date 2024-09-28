@@ -1,0 +1,160 @@
+#include <Wire.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED setup
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// RFID setup
+#define RST_PIN 4
+#define SS_PIN 5
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+// Button and RGB LED setup
+#define BUTTON_PIN 15
+#define LED_PIN_R 14   // Red pin for RGB LED
+#define LED_PIN_G 12   // Green pin for RGB LED
+#define LED_PIN_B 27   // Blue pin for RGB LED
+
+bool addRemoveMode = false;  // Flag to switch between normal and add/remove mode
+byte authorizedUID[10][4];   // Array to store authorized UIDs
+int authorizedCount = 0;      // Count of authorized UIDs
+
+void setup() {
+  Serial.begin(115200);
+
+  // RFID setup
+  SPI.begin();
+  rfid.PCD_Init();
+
+  // OLED setup
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED allocation failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // Button setup
+  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Use internal pull-up resistor
+
+  // RGB LED setup
+  pinMode(LED_PIN_R, OUTPUT);
+  pinMode(LED_PIN_G, OUTPUT);
+  pinMode(LED_PIN_B, OUTPUT);
+  setLEDColor(0, 0, 0);  // Turn off the LED initially
+
+  // Display initial message
+  displayMessage("Place RFID card...");
+}
+
+void loop() {
+  // Check if the button is pressed to toggle add/remove mode
+  if (digitalRead(BUTTON_PIN) == LOW) {  // Active LOW for button
+    addRemoveMode = !addRemoveMode;  // Toggle mode
+    if (addRemoveMode) {
+      displayMessage("Add/Remove Mode");
+      setLEDColor(0, 0, 255);  // Set RGB LED to Blue for add/remove mode
+    } else {
+      displayMessage("Normal Mode");
+      setLEDColor(0, 0, 0);  // Turn off the LED for normal mode
+    }
+    delay(1000);  // Debounce delay
+  }
+
+  // RFID card handling
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  if (addRemoveMode) {
+    // Add or remove the card
+    if (isAuthorized()) {
+      removeUID();
+      displayMessage("Card Removed");
+      setLEDColor(255, 0, 0);  // Set LED to Red for removal
+    } else {
+      addUID();
+      displayMessage("Card Added");
+      setLEDColor(0, 255, 0);  // Set LED to Green for addition
+    }
+  } else {
+    // Normal mode: check if card is authorized
+    if (isAuthorized()) {
+      displayMessage("Access Granted");
+      setLEDColor(0, 255, 0);  // Set LED to Green for access granted
+    } else {
+      displayMessage("Access Denied");
+      setLEDColor(255, 0, 0);  // Set LED to Red for access denied
+    }
+  }
+
+  delay(1000);
+  rfid.PICC_HaltA();  // Stop reading
+}
+
+// Function to check if the card is authorized
+bool isAuthorized() {
+  for (int i = 0; i < authorizedCount; i++) {
+    if (compareUID(authorizedUID[i], rfid.uid.uidByte)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Function to add a UID to the authorized list
+void addUID() {
+  if (authorizedCount < 10) {  // Limiting to 10 authorized cards for simplicity
+    for (int i = 0; i < 4; i++) {
+      authorizedUID[authorizedCount][i] = rfid.uid.uidByte[i];
+    }
+    authorizedCount++;
+  }
+}
+
+// Function to remove the current UID from the authorized list
+void removeUID() {
+  for (int i = 0; i < authorizedCount; i++) {
+    if (compareUID(authorizedUID[i], rfid.uid.uidByte)) {
+      // Shift remaining UIDs
+      for (int j = i; j < authorizedCount - 1; j++) {
+        for (int k = 0; k < 4; k++) {
+          authorizedUID[j][k] = authorizedUID[j + 1][k];
+        }
+      }
+      authorizedCount--;
+      break;
+    }
+  }
+}
+
+// Function to compare two UIDs
+bool compareUID(byte *uid1, byte *uid2) {
+  for (int i = 0; i < 4; i++) {
+    if (uid1[i] != uid2[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Function to display message on OLED
+void displayMessage(String message) {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print(message);
+  display.display();
+}
+
+// Function to set RGB LED color
+void setLEDColor(int red, int green, int blue) {
+  analogWrite(LED_PIN_R, red);
+  analogWrite(LED_PIN_G, green);
+  analogWrite(LED_PIN_B, blue);
+}
