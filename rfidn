@@ -3,9 +3,8 @@
 #include <MFRC522.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <SoftwareSerial.h>
-#include <DFRobotDFPlayerMini.h>
 
+// OLED setup
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -15,21 +14,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SS_PIN 5
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-// DFPlayer Mini setup
-SoftwareSerial mySoftwareSerial(16, 17);  // RX, TX for DFPlayer
-DFRobotDFPlayerMini dfPlayer;
-
-// Button and LED setup
+// Button and RGB LED setup
 #define BUTTON_PIN 15
-#define LED_PIN 13
+#define LED_PIN_R 14   // Red pin for RGB LED
+#define LED_PIN_G 12   // Green pin for RGB LED
+#define LED_PIN_B 27   // Blue pin for RGB LED
 
 bool addRemoveMode = false;  // Flag to switch between normal and add/remove mode
-byte authorizedUID[][4] = { {0xDE, 0xAD, 0xBE, 0xEF} };  // Array to store authorized UIDs
-int authorizedCount = 1;
+byte authorizedUID[10][4];   // Array to store authorized UIDs
+int authorizedCount = 0;      // Count of authorized UIDs
 
 void setup() {
   Serial.begin(115200);
-  
+
   // RFID setup
   SPI.begin();
   rfid.PCD_Init();
@@ -43,17 +40,14 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
-  // DFPlayer Mini setup
-  mySoftwareSerial.begin(9600);
-  if (!dfPlayer.begin(mySoftwareSerial)) {
-    Serial.println("DFPlayer Mini not detected");
-    while (true);
-  }
-  dfPlayer.volume(20);  // Set volume level
+  // Button setup
+  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Use internal pull-up resistor
 
-  // Button and LED setup
-  pinMode(BUTTON_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
+  // RGB LED setup
+  pinMode(LED_PIN_R, OUTPUT);
+  pinMode(LED_PIN_G, OUTPUT);
+  pinMode(LED_PIN_B, OUTPUT);
+  setLEDColor(0, 0, 0);  // Turn off the LED initially
 
   // Display initial message
   displayMessage("Place RFID card...");
@@ -61,14 +55,14 @@ void setup() {
 
 void loop() {
   // Check if the button is pressed to toggle add/remove mode
-  if (digitalRead(BUTTON_PIN) == HIGH) {
+  if (digitalRead(BUTTON_PIN) == LOW) {  // Active LOW for button
     addRemoveMode = !addRemoveMode;  // Toggle mode
     if (addRemoveMode) {
       displayMessage("Add/Remove Mode");
-      digitalWrite(LED_PIN, HIGH);  // Turn on LED to indicate add/remove mode
+      setLEDColor(0, 0, 255);  // Set RGB LED to Blue for add/remove mode
     } else {
       displayMessage("Normal Mode");
-      digitalWrite(LED_PIN, LOW);  // Turn off LED to indicate normal mode
+      setLEDColor(0, 0, 0);  // Turn off the LED for normal mode
     }
     delay(1000);  // Debounce delay
   }
@@ -82,21 +76,21 @@ void loop() {
     // Add or remove the card
     if (isAuthorized()) {
       removeUID();
-      dfPlayer.play(2);  // Play failure sound (removed)
       displayMessage("Card Removed");
+      setLEDColor(255, 0, 0);  // Set LED to Red for removal
     } else {
       addUID();
-      dfPlayer.play(1);  // Play success sound (added)
       displayMessage("Card Added");
+      setLEDColor(0, 255, 0);  // Set LED to Green for addition
     }
   } else {
     // Normal mode: check if card is authorized
     if (isAuthorized()) {
-      dfPlayer.play(1);  // Success sound
       displayMessage("Access Granted");
+      setLEDColor(0, 255, 0);  // Set LED to Green for access granted
     } else {
-      dfPlayer.play(2);  // Failure sound
       displayMessage("Access Denied");
+      setLEDColor(255, 0, 0);  // Set LED to Red for access denied
     }
   }
 
@@ -156,4 +150,11 @@ void displayMessage(String message) {
   display.setCursor(0, 0);
   display.print(message);
   display.display();
+}
+
+// Function to set RGB LED color
+void setLEDColor(int red, int green, int blue) {
+  analogWrite(LED_PIN_R, red);
+  analogWrite(LED_PIN_G, green);
+  analogWrite(LED_PIN_B, blue);
 }
